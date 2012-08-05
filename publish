@@ -1,0 +1,1 @@
+rsync -av -e ssh public/ alan@www.prettyrobots.com:/opt/var/www/www.prettyrobots.com/
