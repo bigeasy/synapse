@@ -1,15 +1,18 @@
 { "name": "Synapse"
-, "version": "0.0"
+, "version": "0.0.0"
 , "manifest_version": 2
 , "description": "Creates a Synapse Peer on the Synapse network that runs from your Google Chrome browser."
+, "update_url": "https://www.prettyrobots.com/synapse/chromium-osx.xml"
 , "permissions":
   [ "https://www.prettyrobots.com/synapse"
   ]
 , "content_scripts":
   [
-    { "matches": [ "http://synapse:8083/synapse" , "https://www.prettyrobots.com/synapse" ]
+    { "matches": 
+      [ "https://www.prettyrobots.com/synapse" 
+      ]
     , "js": [ "content.js" ]
     }
   ]
-, "background": ["page", "background.html"]
+, "background": ["script", "background.js"]
 }
