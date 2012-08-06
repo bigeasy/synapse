@@ -1,0 +1,18 @@
+{ "name": "package"
+, "description": "A peer-to-peer micro-sharing framework in Node.js"
+, "author": "Alan Gutierrez"
+, "version": "0.0.0"
+, "keywords":  [ "json", "html", "xml", "p2p", "peer-to-peer", "async", "asynchronous", "status", "share", "sharing" ]
+, "licenses": [
+  { "type": "MIT"
+  , "url": "http://github.com/bigeasy/synapse/raw/master/LICENSE"
+  }]
+, "homepage": "https://github.com/bigeasy/synapse"
+, "repository":
+  { "type": "git"
+  , "url": "git://github.com/bigeasy/synapse.git"
+  }
+, "devDependencies":
+  {}
+, "dependencies": { }
+}
