@@ -1,4 +1,6 @@
+# Synapse
+
 A peer-to-peer micro-sharing network server.
 
-Current development is taking place off of the master branch. Please have a look
-around at different branches and the GitHub Issues.
+Thoughts on Synapse? Join the
+[Discussion](https://github.com/bigeasy/synapse/issues/1).
