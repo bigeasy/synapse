@@ -82,11 +82,13 @@ struct plugin {
   int log;
   /* The full path to the relay program. */
   char relay[PATH_MAX];
-  /* The full path to the Cubby web server. */
-  char cubby[PATH_MAX];
-  /* The shutdown key for the Cubby web server. */
-  char shutdown[256];
-  /* The port of the cubby server. */
+  /* The full path to node. */
+  char node[PATH_MAX];
+  /* The full path to the node process monitor. */
+  char monitor[PATH_MAX];
+  /* The shutdown key for the process monitor. */
+  char shutdown[1024 * 5];
+  /* The local port of the peer. */
   int port;
   /* Used to perform the GET that shuts down the Cubby web server. */
   CURL *curl;
@@ -102,15 +104,7 @@ struct plugin {
 static struct plugin plugin;
 
 /* Say something into the debugging log. */
-void say(const char* format, ...) {
-  char buffer[4096];
-  va_list args;
-  va_start(args,format);
-  vsnprintf(buffer, sizeof(buffer), format, args);
-  va_end(args);
-  write(plugin.log, buffer, strlen(buffer));
-  fsync(plugin.log);
-}
+extern void say(const char* format, ...);
 
 /* Entry points for the plugin dynamic link library. Note that, the `main`
  * function that was once necessary for Mac OS no longer applies to OS X
@@ -130,13 +124,15 @@ void OSCALL NP_Shutdown();
 #pragma export off
 
 void starter(int restart) {
-  char const *argv[] = { NULL };
+  char const *argv[] = { plugin.monitor, NULL };
+
+  if (restart) sleep(5);
 
   (void) pthread_mutex_lock(&plugin.mutex);
   plugin.port = 0;
   (void) pthread_mutex_unlock(&plugin.mutex);
 
-  attendant.start(plugin.cubby, argv);
+  attendant.start(plugin.node, argv);
 }
 
 void connector(attendant__pipe_t in, attendant__pipe_t out) {
@@ -160,15 +156,17 @@ void connector(attendant__pipe_t in, attendant__pipe_t out) {
    */
 
   /* */
-  char buffer[1024], *start = buffer, *newline;
+  char buffer[1024 * 10], *start = buffer, *newline;
   struct pollfd fd;
   int err, offset = 0, newlines = 0;
 
   fd.fd = out;
   fd.events = POLLIN;
 
+  say("CONNECTING!");
+
   err = fcntl(out, F_SETFL, O_NONBLOCK);
-  say("CONNECTOR! %d\n", err);
+  say("CONNECTOR! %d", err);
 
   start = buffer;
   memset(buffer, 0, sizeof(buffer));
@@ -176,6 +174,7 @@ void connector(attendant__pipe_t in, attendant__pipe_t out) {
     newlines = 0;
     fd.revents = 0;
 
+    say("poll");
     HANDLE_EINTR(poll(&fd, 1, -1), err);
 
     err = read(out, start + offset, sizeof(buffer) - offset);
@@ -190,30 +189,29 @@ void connector(attendant__pipe_t in, attendant__pipe_t out) {
     }
   }
 
+  say("done");
+
   newline = strchr(buffer, '\n');
   strncpy(plugin.shutdown, buffer, newline- buffer);
   plugin.port = atoi(++newline);
+
+  say("SHUTDOWN: %s, PORT: %d", plugin.shutdown, plugin.port);
 
   (void) pthread_mutex_lock(&plugin.mutex);
   (void) pthread_cond_signal(&plugin.cond);
   (void) pthread_mutex_unlock(&plugin.mutex);
 
-  say("SHUTDOWN: %s\nPORT: %d\n", plugin.shutdown, plugin.port);
+  say("SHUTDOWN: %s, PORT: %d", plugin.shutdown, plugin.port);
 }
 
 NPError OSCALL NP_Initialize(NPNetscapeFuncs *browser) {
   const char *home;
-  char logfile[PATH_MAX], cubby[PATH_MAX];
+  char logfile[PATH_MAX];
   const char* dir;
   Dl_info library;
   struct attendant__initializer initializer;
 
-  /* Create a log in the home directory of the current user. */
-  home = getenv("HOME");
-  snprintf(logfile, sizeof(logfile), "%s/verity.log", home);
-  plugin.log = open(logfile, O_WRONLY | O_APPEND | O_CREAT, 0644);
-
-  say("NP_Initialize\n");
+  say("NP_Initialize");
 
   /* Copy the browser NPAPI functions into our library. */
   npn_get_url = browser->geturl;
@@ -281,12 +279,14 @@ NPError OSCALL NP_Initialize(NPNetscapeFuncs *browser) {
   while (*dir != '/') {
     dir--;
   }
-  strncat(plugin.cubby, library.dli_fname, dir - library.dli_fname);
-  strcat(plugin.cubby, "/cubby");
+  strncat(plugin.node, library.dli_fname, dir - library.dli_fname);
+  strcat(plugin.node, "/node");
 
   memset(&initializer, 0, sizeof(struct attendant__initializer));
   strncat(initializer.relay, library.dli_fname, dir - library.dli_fname);
   strcat(initializer.relay, "/relay");
+  strncat(plugin.monitor, library.dli_fname, dir - library.dli_fname);
+  strcat(plugin.monitor, "/monitor.js");
 
   initializer.starter = starter;
   initializer.connector = connector;
@@ -296,8 +296,8 @@ NPError OSCALL NP_Initialize(NPNetscapeFuncs *browser) {
 
   starter(0);
 
-  say("cubby: %s\n", plugin.cubby);
-  say("relay: %s\n", initializer.relay);
+  say("node: %s", plugin.node);
+  say("relay: %s", initializer.relay);
 
   plugin.curl = curl_easy_init();
 
@@ -305,44 +305,44 @@ NPError OSCALL NP_Initialize(NPNetscapeFuncs *browser) {
 }
 
 /* Our plugin has a scriptable object. This is it. */
-struct verity_object {
+struct synapse_object {
   NPClass *class;
   uint32_t reference_count;
 };
 
-struct NPClass verity_class;
+struct NPClass synapse_class;
 
-NPObject* Verity_Allocate(NPP npp, NPClass *class) {
-  struct verity_object *object;
-  say("Verity_Allocate\n");
-  object = (struct verity_object*) malloc(sizeof(struct verity_object));
-  object->class = &verity_class; 
+NPObject* Synapse_Allocate(NPP npp, NPClass *class) {
+  struct synapse_object *object;
+  say("Synapse_Allocate");
+  object = (struct synapse_object*) malloc(sizeof(struct synapse_object));
+  object->class = &synapse_class; 
   object->reference_count = 1;
   return (NPObject*) object;
 }
 
-void Verity_Deallocate(NPObject *object) {
-  say("Verity_Dellocate\n");
+void Synapse_Deallocate(NPObject *object) {
+  say("Synapse_Dellocate");
 }
 
-void Verity_Invalidate(NPObject *object) {
+void Synapse_Invalidate(NPObject *object) {
 }
 
-bool Verity_HasMethod(NPObject *object, NPIdentifier name) {
+bool Synapse_HasMethod(NPObject *object, NPIdentifier name) {
   return false;
 }
 
-bool Verity_Invoke(NPObject *object, NPIdentifier name, const NPVariant *argv,
+bool Synapse_Invoke(NPObject *object, NPIdentifier name, const NPVariant *argv,
     uint32_t argc, NPVariant *result) {
   return true;
 }
 
-bool Verity_InvokeDefault(NPObject *object, const NPVariant *argv,
+bool Synapse_InvokeDefault(NPObject *object, const NPVariant *argv,
     uint32_t argc, NPVariant *result) {
   return true;
 }
 
-bool Verity_HasProperty(NPObject *object, NPIdentifier name) {
+bool Synapse_HasProperty(NPObject *object, NPIdentifier name) {
   bool exists = false;
   if (npn_identifier_is_string(name)) {
     NPUTF8* string = npn_utf8_from_indentifier(name);
@@ -352,12 +352,11 @@ bool Verity_HasProperty(NPObject *object, NPIdentifier name) {
   return exists;
 }
 
-bool Verity_GetProperty(NPObject *object, NPIdentifier name, NPVariant *result) {
+bool Synapse_GetProperty(NPObject *object, NPIdentifier name, NPVariant *result) {
   bool exists = false;
-  Dl_info library;
   if (npn_identifier_is_string(name)) {
     NPUTF8* string = npn_utf8_from_indentifier(name);
-    say("Verity_GetProperty: %s\n", string);
+    say("Synapse_GetProperty: %s", string);
     exists = strcmp(string, "port") == 0;
     if (exists) {
       result->type = NPVariantType_Int32;
@@ -373,169 +372,175 @@ bool Verity_GetProperty(NPObject *object, NPIdentifier name, NPVariant *result) 
   return exists;
 }
 
-bool Verity_SetProperty(NPObject *object, NPIdentifier name, const NPVariant *value) {
+bool Synapse_SetProperty(NPObject *object, NPIdentifier name, const NPVariant *value) {
   return false;
 }
 
-bool Verity_RemoveProperty(NPObject *object, NPIdentifier name) {
+bool Synapse_RemoveProperty(NPObject *object, NPIdentifier name) {
   return false;
 }
 
-bool Verity_Enumeration(NPObject *object, NPIdentifier **value, uint32_t *count) {
+bool Synapse_Enumeration(NPObject *object, NPIdentifier **value, uint32_t *count) {
   return false;
 }
 
-bool Verity_Construct(NPObject *object, const NPVariant *argv, uint32_t argc,
+bool Synapse_Construct(NPObject *object, const NPVariant *argv, uint32_t argc,
     NPVariant *result) {
   return false;
 }
 
-struct NPClass verity_class = {
-  NP_CLASS_STRUCT_VERSION, Verity_Allocate, Verity_Deallocate,
-  Verity_Invalidate, Verity_HasMethod, Verity_Invoke, Verity_InvokeDefault,
-  Verity_HasProperty, Verity_GetProperty, Verity_SetProperty,
-  Verity_RemoveProperty, Verity_Enumeration, Verity_Construct
+struct NPClass synapse_class = {
+  NP_CLASS_STRUCT_VERSION, Synapse_Allocate, Synapse_Deallocate,
+  Synapse_Invalidate, Synapse_HasMethod, Synapse_Invoke, Synapse_InvokeDefault,
+  Synapse_HasProperty, Synapse_GetProperty, Synapse_SetProperty,
+  Synapse_RemoveProperty, Synapse_Enumeration, Synapse_Construct
 };
 
-NPError NP_LOADDS Verity_New(NPMIMEType mime, NPP instance, uint16_t mode,
+NPError NP_LOADDS Synapse_New(NPMIMEType mime, NPP instance, uint16_t mode,
   int16_t argc, char* argn[], char* argv[], NPSavedData* saved) {
-  say("NPP_New\n");
+  say("NPP_New");
   return NPERR_NO_ERROR;
 }
 
-NPError NP_LOADDS Verity_Destroy(NPP instance, NPSavedData** save) {
-  say("NPP_Destroy\n");
+NPError NP_LOADDS Synapse_Destroy(NPP instance, NPSavedData** save) {
+  say("NPP_Destroy");
   return NPERR_NO_ERROR;
 }
 
-NPError NP_LOADDS Verity_SetWindow(NPP instance, NPWindow* window) {
-  say("NPP_SetWindow\n");
+NPError NP_LOADDS Synapse_SetWindow(NPP instance, NPWindow* window) {
+  say("NPP_SetWindow");
+
   return NPERR_NO_ERROR;
 }
 
-NPError NP_LOADDS Verity_NewStream(NPP instance, NPMIMEType type,
+NPError NP_LOADDS Synapse_NewStream(NPP instance, NPMIMEType type,
     NPStream *stream, NPBool seekable, uint16_t* stype) {
-  say("NPP_NewStream\n");
+  say("NPP_NewStream");
   return NPERR_NO_ERROR;
 }
 
-NPError NP_LOADDS Verity_DestroyStream(NPP instance, NPStream* stream,
+NPError NP_LOADDS Synapse_DestroyStream(NPP instance, NPStream* stream,
     NPReason reason) {
-  say("NPP_DestroyStream\n");
+  say("NPP_DestroyStream");
   return NPERR_NO_ERROR;
 }
 
-int32_t NP_LOADDS Verity_WriteReady(NPP instance, NPStream *stream) {
-  say("NPP_WriteReady\n");
+void NP_LOADDS Synapse_AsFile(NPP instance, NPStream* stream, const char* fname) {
+  say("NPP_StreamAsFile");
+}
+
+int32_t NP_LOADDS Synapse_WriteReady(NPP instance, NPStream *stream) {
+  say("NPP_WriteReady");
   return 0;
 }
 
-int32_t NP_LOADDS Verity_Write(NPP instance, NPStream *stream, int32_t offset,
+int32_t NP_LOADDS Synapse_Write(NPP instance, NPStream *stream, int32_t offset,
     int32_t len, void *buffer) {
-  say("NPP_Write\n");
+  say("NPP_Write");
   return 0;
 }
 
-void NP_LOADDS Verity_Print(NPP instance, NPPrint *print) {
-  say("NPP_Print\n");
+void NP_LOADDS Synapse_Print(NPP instance, NPPrint *print) {
+  say("NPP_Print");
 }
 
-int16_t NP_LOADDS Verity_HandleEvent(NPP instance, void *event) {
-  say("NPP_HandleEvent\n");
+int16_t NP_LOADDS Synapse_HandleEvent(NPP instance, void *event) {
+  say("NPP_HandleEvent");
   return 0;
 }
 
-void NP_LOADDS Verity_URLNotify(NPP instance, const char *url,
+void NP_LOADDS Synapse_URLNotify(NPP instance, const char *url,
     NPReason reason, void *data) {
-  say("NPP_URLNotify\n");
+  say("NPP_URLNotify");
 }
 
-NPError NP_LOADDS Verity_GetValue(NPP instance, NPPVariable variable,
+NPError NP_LOADDS Synapse_GetValue(NPP instance, NPPVariable variable,
     void *value) {
   switch (variable) {
     case NPPVpluginScriptableNPObject:
-      (*(NPObject**)value) = npn_create_object(instance, &verity_class);  
+      (*(NPObject**)value) = npn_create_object(instance, &synapse_class);  
     default:
       break;
   }
-  say("NPP_GetValue %d\n", variable);
+  say("NPP_GetValue %d", variable);
   return NPERR_NO_ERROR;
 }
 
-NPError NP_LOADDS Verity_SetValue(NPP instance, NPNVariable variable,
+NPError NP_LOADDS Synapse_SetValue(NPP instance, NPNVariable variable,
     void *value) {
-  say("NPP_SetValue\n");
+  say("NPP_SetValue");
   return NPERR_NO_ERROR;
 }
 
-NPBool NP_LOADDS Verity_GotFocus(NPP instance, NPFocusDirection direction) {
-  say("NPP_GotFocus\n");
+NPBool NP_LOADDS Synapse_GotFocus(NPP instance, NPFocusDirection direction) {
+  say("NPP_GotFocus");
   return NPERR_NO_ERROR;
 }
 
-void NP_LOADDS Verity_LostFocus(NPP instance) {
-  say("NPP_LostFocus\n");
+void NP_LOADDS Synapse_LostFocus(NPP instance) {
+  say("NPP_LostFocus");
 }
 
-void NP_LOADDS Verity_URLRedirectNotify(NPP instance, const char *url,
+void NP_LOADDS Synapse_URLRedirectNotify(NPP instance, const char *url,
     int32_t status, void *data) {
-  say("NPP_URLRedirectNotify\n");
+  say("NPP_URLRedirectNotify");
 }
 
-NPError NP_LOADDS Verity_ClearSiteData(const char *site, uint64_t flags, uint64_t maxAge) {
-  say("NPP_ClearSiteData\n");
+NPError NP_LOADDS Synapse_ClearSiteData(const char *site, uint64_t flags, uint64_t maxAge) {
+  say("NPP_ClearSiteData");
   return NPERR_NO_ERROR;
 }
 
-char** NP_LOADDS Verity_GetSitesWithData() {
-  say("NPP_GetSitesWithData\n");
+char** NP_LOADDS Synapse_GetSitesWithData() {
+  say("NPP_GetSitesWithData");
   return NULL;
 }
 
 NPError OSCALL NP_GetEntryPoints(NPPluginFuncs *class) {
-  say("NP_GetEntryPoints\n");
+  say("NP_GetEntryPoints");
   class->size = sizeof(NPPluginFuncs);
   class->version = (NP_VERSION_MAJOR << 8) + NP_VERSION_MINOR;
   /* TODO Lower case these. */
-  class->newp = Verity_New;
-  class->destroy = Verity_Destroy;
-  class->setwindow = Verity_SetWindow;
-  class->newstream = Verity_NewStream;
-  class->destroystream = Verity_DestroyStream;
-  class->writeready = Verity_WriteReady;
-  class->write = Verity_Write;
-  class->print = Verity_Print;
-  class->urlnotify = Verity_URLNotify;
-  class->getvalue = Verity_GetValue;
-  class->setvalue = Verity_SetValue;
-  class->gotfocus = Verity_GotFocus;
-  class->lostfocus = Verity_LostFocus;
-  class->urlredirectnotify = Verity_URLRedirectNotify;
-  class->clearsitedata = Verity_ClearSiteData;
-  class->getsiteswithdata = Verity_GetSitesWithData;
+  class->newp = Synapse_New;
+  class->destroy = Synapse_Destroy;
+  class->setwindow = Synapse_SetWindow;
+  class->newstream = Synapse_NewStream;
+  class->destroystream = Synapse_DestroyStream;
+  class->asfile = Synapse_AsFile;
+  class->writeready = Synapse_WriteReady;
+  class->write = Synapse_Write;
+  class->print = Synapse_Print;
+  class->event = Synapse_HandleEvent;
+  class->urlnotify = Synapse_URLNotify;
+  class->getvalue = Synapse_GetValue;
+  class->setvalue = Synapse_SetValue;
+  class->gotfocus = Synapse_GotFocus;
+  class->lostfocus = Synapse_LostFocus;
+  class->urlredirectnotify = Synapse_URLRedirectNotify;
+  class->clearsitedata = Synapse_ClearSiteData;
+  class->getsiteswithdata = Synapse_GetSitesWithData;
   return NPERR_NO_ERROR;
 }
 
 void OSCALL NP_Shutdown() {
-  say("NP_Shutdown\n");
+  say("NP_Shutdown");
   char url[4096];
   attendant.shutdown();
   if (plugin.curl) {
-    sprintf(url, "http://127.0.0.1:%d/cubby/shutdown?%s", plugin.port, plugin.shutdown);
-    say("Requesting shutdown: %s.\n", url);
+    sprintf(url, "http://127.0.0.1:%d/shutdown?%s", plugin.port, plugin.shutdown);
+    say("Requesting shutdown: %s.", url);
     curl_easy_setopt(plugin.curl, CURLOPT_URL, url);
     curl_easy_perform(plugin.curl);
     curl_easy_cleanup(plugin.curl);
   }
   if (!attendant.done(250)) {
-    say("Scram Cubby!\n");
+    say("Scram Node.js!");
     attendant.scram();
     if (!attendant.done(500)) {
-      say("Cubby still running!\n");
+      say("Node.js still running!");
     }
   }
-  say("Shutdown.\n");
-  close(plugin.log);
+  say("Shutdown.");
 }
 
 char* OSCALL NP_GetMIMEDescription() {
