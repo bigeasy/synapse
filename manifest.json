@@ -1,8 +1,9 @@
 { "name": "Synapse"
-, "version": "0.0.0"
+, "version": "0.0.1"
 , "manifest_version": 2
 , "description": "Creates a Synapse Peer on the Synapse network that runs from your Google Chrome browser."
 , "update_url": "https://www.prettyrobots.com/synapse/chromium-osx.xml"
+, "homepage_url": "https://www.prettyrobots.com/synapse/"
 , "permissions":
   [ "https://www.prettyrobots.com/synapse"
   ]
