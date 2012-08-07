@@ -1,0 +1,10 @@
+mkdir -p dist
+
+rsync --exclude '.git' -av chromium/ dist/
+
+(cd npapi/build && make install)
+
+rsync --exclude 'monitor.js' --exclude '.git' -av npapi/build/synapse.plugin/ dist/synapse.plugin/
+
+rsync --exclude '.git' -av peer/ dist/synapse.plugin/Contents/MacOS/
+
