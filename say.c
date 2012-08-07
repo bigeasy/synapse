@@ -22,7 +22,7 @@ void say(const char* format, ...) {
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = inet_addr("127.0.0.1");
     addr.sin_port = htons(port);
-    
+
     sendto(fd, buffer, strlen(buffer), 0, (struct sockaddr *) &addr, sizeof(addr));
     close(fd);
     fd = -1;

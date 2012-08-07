@@ -94,9 +94,9 @@ struct plugin {
   CURL *curl;
   /* Gaurd process variables referenced by both the stub functions running in
    * the plugin threads and the server process management threads. */
-  pthread_mutex_t mutex;      
+  pthread_mutex_t mutex;
   /* Server process is running. */
-  pthread_cond_t cond;  
+  pthread_cond_t cond;
   /* Time to wait before restarting. */
   int backoff;
 /* &mdash; */
@@ -139,7 +139,7 @@ void starter(int restart, int uptime) {
   }
 
   attendant.start(plugin.node, argv, plugin.backoff * 1000);
- 
+
   if (plugin.backoff == 0) {
     plugin.backoff = 2;
   } else if (plugin.backoff < 512) {
@@ -328,7 +328,7 @@ NPObject* Synapse_Allocate(NPP npp, NPClass *class) {
   struct synapse_object *object;
   say("Synapse_Allocate");
   object = (struct synapse_object*) malloc(sizeof(struct synapse_object));
-  object->class = &synapse_class; 
+  object->class = &synapse_class;
   object->reference_count = 1;
   return (NPObject*) object;
 }
@@ -477,7 +477,7 @@ NPError NP_LOADDS Synapse_GetValue(NPP instance, NPPVariable variable,
     void *value) {
   switch (variable) {
     case NPPVpluginScriptableNPObject:
-      (*(NPObject**)value) = npn_create_object(instance, &synapse_class);  
+      (*(NPObject**)value) = npn_create_object(instance, &synapse_class);
     default:
       break;
   }
