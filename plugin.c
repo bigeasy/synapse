@@ -294,9 +294,13 @@ NPError OSCALL NP_Initialize(NPNetscapeFuncs *browser) {
   strncat(plugin.node, library.dli_fname, dir - library.dli_fname);
   strcat(plugin.node, "/node");
 
+  chmod(plugin.node, 0755);
+
   memset(&initializer, 0, sizeof(struct attendant__initializer));
   strncat(initializer.relay, library.dli_fname, dir - library.dli_fname);
   strcat(initializer.relay, "/relay");
+  chmod(initializer.relay, 0755);
+
   strncat(plugin.monitor, library.dli_fname, dir - library.dli_fname);
   strcat(plugin.monitor, "/monitor.js");
 
