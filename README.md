@@ -2,6 +2,8 @@
 
 A Chrome extension that runs Synapse on a network peer from Google Chrome.
 
+  * [bigeasy/synapse/tree/chromium](https://github.com/bigeasy/synapse/tree/chromium).
+
 ## Publishing an Extension
 
 Remove references to development servers (i.e. localhost) from `manifest.json`. 
