@@ -97,6 +97,8 @@ struct plugin {
   pthread_mutex_t mutex;      
   /* Server process is running. */
   pthread_cond_t cond;  
+  /* Time to wait before restarting. */
+  int backoff;
 /* &mdash; */
 };
 
@@ -123,16 +125,26 @@ void OSCALL NP_Shutdown();
 /* */
 #pragma export off
 
-void starter(int restart) {
+void starter(int restart, int uptime) {
   char const *argv[] = { plugin.monitor, NULL };
 
-  if (restart) sleep(5);
+  say("starter: restart %d, uptime %d", restart, uptime);
 
   (void) pthread_mutex_lock(&plugin.mutex);
   plugin.port = 0;
   (void) pthread_mutex_unlock(&plugin.mutex);
 
-  attendant.start(plugin.node, argv);
+  if (uptime > 3600) {
+    plugin.backoff = 0;
+  }
+
+  attendant.start(plugin.node, argv, plugin.backoff * 1000);
+ 
+  if (plugin.backoff == 0) {
+    plugin.backoff = 2;
+  } else if (plugin.backoff < 512) {
+    plugin.backoff *= 2;
+  }
 }
 
 void connector(attendant__pipe_t in, attendant__pipe_t out) {
@@ -294,7 +306,7 @@ NPError OSCALL NP_Initialize(NPNetscapeFuncs *browser) {
 
   attendant.initialize(&initializer);
 
-  starter(0);
+  starter(0, -1);
 
   say("node: %s", plugin.node);
   say("relay: %s", initializer.relay);
@@ -409,7 +421,6 @@ NPError NP_LOADDS Synapse_Destroy(NPP instance, NPSavedData** save) {
 
 NPError NP_LOADDS Synapse_SetWindow(NPP instance, NPWindow* window) {
   say("NPP_SetWindow");
-
   return NPERR_NO_ERROR;
 }
 
@@ -444,8 +455,16 @@ void NP_LOADDS Synapse_Print(NPP instance, NPPrint *print) {
   say("NPP_Print");
 }
 
+// We do not trace this function because Google Chrome sends a null event every
+// tenth of a second or so. We do get an activate event initially, with a window
+// handle to the activated window.
+//
+// We don't handle any of these messages, so we return false. Somewhere, it is
+// said that null events should be handled to keep the browser from handling
+// them, but I found that too amusing to take seriously.
+
+//
 int16_t NP_LOADDS Synapse_HandleEvent(NPP instance, void *event) {
-  say("NPP_HandleEvent");
   return 0;
 }
 
